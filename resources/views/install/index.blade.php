@@ -11,6 +11,7 @@
 @include('install.hosting-check', [
     'deploymentUrl' => $diagnostics['detected_app_url'],
     'serverReady' => $allPassed,
+    'serverFailures' => $serverFailures,
 ])
 
 <div class="mt-6 border-t border-slate-100 pt-6">

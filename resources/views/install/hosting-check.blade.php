@@ -2,6 +2,7 @@
     $finalCheck = $finalCheck ?? false;
     $serverReady = $serverReady ?? true;
     $nativeInstaller = $nativeInstaller ?? false;
+    $serverFailures = $serverFailures ?? [];
 @endphp
 <style nonce="{{ $csp_nonce ?? '' }}">
     .installer-readiness { text-align: center; padding: 1.5rem 0 1.25rem; }
@@ -16,6 +17,12 @@
     .installer-readiness[data-state="failed"] [data-failed-icon] { display: block; }
     .installer-readiness__title { margin: 0; color: #0f172a; font-size: 1.2rem; font-weight: 750; letter-spacing: -.02em; }
     .installer-readiness__message { max-width: 27rem; margin: .55rem auto 0; color: #64748b; font-size: .9rem; line-height: 1.6; }
+    .installer-diagnostics { display:none; margin:1.25rem auto 0; max-width:42rem; text-align:left; border:1px solid #fecaca; border-radius:14px; background:#fffafa; padding:1rem 1.1rem; color:#7f1d1d; }
+    .installer-diagnostics[data-visible="true"] { display:block; }
+    .installer-diagnostics h3 { margin:0 0 .55rem; font-size:.92rem; font-weight:750; color:#991b1b; }
+    .installer-diagnostics p { margin:.35rem 0; font-size:.82rem; line-height:1.55; }
+    .installer-diagnostics ul { margin:.5rem 0 0; padding-left:1.2rem; font-size:.82rem; line-height:1.65; }
+    .installer-diagnostics code { overflow-wrap:anywhere; font-size:.76rem; }
     [data-deployment-continue][hidden], [data-deployment-submit][hidden], [data-hosting-recheck] { display: none !important; }
     @keyframes installer-spin { to { transform: rotate(360deg); } }
 </style>
@@ -28,6 +35,10 @@
     </div>
     <p class="installer-readiness__title" data-hosting-result>Checking...</p>
     <p class="installer-readiness__message" data-hosting-message>We’re making sure everything is ready.</p>
+    <section class="installer-diagnostics" data-installer-diagnostics aria-live="polite">
+        <h3 data-diagnostic-title>What needs to be fixed?</h3>
+        <div data-diagnostic-content></div>
+    </section>
     <button type="button" data-hosting-recheck tabindex="-1" aria-hidden="true">Check again</button>
     <noscript><p class="installer-readiness__message">JavaScript is required to verify your server safely.</p></noscript>
 </div>
@@ -38,24 +49,73 @@ document.addEventListener('DOMContentLoaded', () => {
     const finalCheck = @json($finalCheck);
     const serverReady = @json($serverReady);
     const nativeInstaller = @json($nativeInstaller);
+    const serverFailures = @json(array_values($serverFailures));
     const installerCsrf = @json($deploymentCsrfToken ?? csrf_token());
     const installerDiagToken = @json($deploymentDiagnosticToken ?? (function_exists('session') ? session('installer.diagnostic_token') : null) ?? '');
     const panel = document.querySelector('[data-installer-readiness]');
     const output = panel.querySelector('[data-hosting-result]');
     const message = panel.querySelector('[data-hosting-message]');
     const recheck = panel.querySelector('[data-hosting-recheck]');
+    const diagnostics = panel.querySelector('[data-installer-diagnostics]');
+    const diagnosticTitle = panel.querySelector('[data-diagnostic-title]');
+    const diagnosticContent = panel.querySelector('[data-diagnostic-content]');
     const links = document.querySelectorAll('[data-deployment-continue]');
     const submits = document.querySelectorAll('[data-deployment-submit]');
-    const setStatus = (state, reason = null) => {
+    const requirementHelp = {
+        'PHP >= 8.2': 'Select PHP 8.2 or newer in Hostinger hPanel → PHP Configuration.',
+        'Compatible PHP handler': 'The website must run using a supported PHP handler. Hostinger LiteSpeed is supported by this build; check the active PHP version/handler in hPanel.',
+        'PDO Extension': 'Enable the PDO PHP extension in PHP Configuration.',
+        'PDO MySQL (required)': 'Enable pdo_mysql in PHP extensions. This is required to connect to MySQL.',
+        'OpenSSL Extension': 'Enable the OpenSSL PHP extension.',
+        'Mbstring Extension': 'Enable the mbstring PHP extension.',
+        'Tokenizer Extension': 'Enable the tokenizer PHP extension.',
+        'JSON Extension': 'Enable the JSON PHP extension.',
+        'cURL Extension': 'Enable the cURL PHP extension.',
+        'Fileinfo Extension': 'Enable the fileinfo PHP extension.',
+        'XML Extension': 'Enable the XML PHP extension.',
+        'Ctype Extension': 'Enable the ctype PHP extension.',
+        'BCMath Extension': 'Enable the bcmath PHP extension.',
+        'storage/ writable': 'Make the storage directory writable by the website PHP user.',
+        'storage/framework/cache writable': 'Make storage/framework/cache writable by the website PHP user.',
+        'storage/framework/sessions writable': 'Make storage/framework/sessions writable by the website PHP user.',
+        'storage/framework/views writable': 'Make storage/framework/views writable by the website PHP user.',
+        'storage/logs writable': 'Make storage/logs writable by the website PHP user.',
+        'bootstrap/cache/ writable': 'Make bootstrap/cache writable by the website PHP user.',
+        '.env writable': 'Allow PHP to create or update the .env file in the application root.',
+        'Session Support': 'Enable PHP sessions in the hosting PHP configuration.',
+        'Production Assets (Vite build)': 'Upload the complete public/build directory, including manifest.json, from the production package.'
+    };
+    const stageHelp = {
+        server: 'One or more server requirements failed. See the failed items listed below.',
+        public_directory: 'The website root is exposing or incorrectly routing a private-file test. Set the domain document root to the application public directory and verify the root/public .htaccess files.',
+        routing: 'The application routing test did not return the expected response. Check the domain document root, rewrite rules, and whether Laravel can boot without a PHP error.',
+        assets: 'A public build file is missing, inaccessible, or served with the wrong content type. Re-upload public/build and check LiteSpeed/static-file rules.',
+        private_files: 'A private application file is publicly accessible. Restore the supplied .htaccess rules and ensure the domain points to public/, not the project root.',
+        session: 'The session cookie or CSRF test failed. Check PHP session support, session directory permissions, HTTPS configuration, and cookie path.',
+        application_urls: 'The configured APP_URL or generated login/dashboard URLs do not match the website URL. Correct APP_URL in .env, then clear config cache.',
+        installer_lock: 'The installer is not locked after completion. Do not leave the installer accessible; restore the supplied installer protection rules.'
+    };
+    const showDiagnostics = (title, paragraphs = [], items = []) => {
+        diagnosticTitle.textContent = title;
+        diagnosticContent.replaceChildren();
+        paragraphs.forEach(value => { const p = document.createElement('p'); p.textContent = value; diagnosticContent.appendChild(p); });
+        if (items.length) {
+            const ul = document.createElement('ul');
+            items.forEach(item => { const li = document.createElement('li'); li.textContent = item; ul.appendChild(li); });
+            diagnosticContent.appendChild(ul);
+        }
+        diagnostics.dataset.visible = 'true';
+    };
+    const setStatus = (state, reason = null, detail = '') => {
         panel.dataset.state = state;
         output.textContent = state === 'ready' ? 'All checks passed' : state === 'failed' ? 'Setup not ready' : 'Checking...';
         message.textContent = state === 'ready'
             ? 'Your server is ready. You can continue safely.'
             : state === 'failed'
-                ? reason === 'public_directory'
-                    ? 'Open your hosting panel and set the website’s Running Directory to /public, then refresh this page.'
-                    : 'Your server is not ready for installation. Please contact your hosting administrator.'
+                ? (stageHelp[reason] || 'The readiness test failed. Review the diagnostic details below.')
                 : 'We’re making sure everything is ready.';
+        if (state !== 'failed') diagnostics.dataset.visible = 'false';
+        if (state === 'failed' && detail) showDiagnostics('Exact check failure', ['Check stage: ' + reason, 'Technical detail: ' + detail]);
     };
     const fetchAt = (path, options = {}) => {
         const target = new URL(base + '/' + path);
@@ -84,7 +144,11 @@ document.addEventListener('DOMContentLoaded', () => {
         setStatus('checking');
         let stage = 'server';
         try {
-            if (!serverReady) throw new Error('A required server capability or writable directory is unavailable.');
+            if (!serverReady) {
+                const names = serverFailures.length ? serverFailures : ['The server-side readiness check returned false, but did not provide a failed item.'];
+                showDiagnostics('Server requirements that failed', ['These are checks performed directly by PHP before browser tests can run.'], names.map(name => name + ': ' + (requirementHelp[name] || 'Review this server setting or file permission.')));
+                throw new Error('Server requirement failure: ' + names.join(', '));
+            }
             if (new URL(base).origin !== window.location.origin) throw new Error('The configured application origin does not match the browser origin.');
             stage = 'public_directory';
             const privateSentinel = await fetchAt('deployment-private-check.txt', {method: 'HEAD'});
@@ -149,7 +213,10 @@ document.addEventListener('DOMContentLoaded', () => {
             submits.forEach(button => { button.hidden = false; button.disabled = false; });
             setStatus('ready');
         } catch (error) {
-            setStatus('failed', stage);
+            setStatus('failed', stage, String(error?.message || error || 'Unknown error'));
+            if (stage === 'server' && serverFailures.length) {
+                showDiagnostics('Server requirements that failed', ['Fix the following items in your hosting control panel or file manager, then reload this page.'], serverFailures.map(name => name + ': ' + (requirementHelp[name] || 'Review this server setting or file permission.')));
+            }
             await reportFailure(stage, error);
         }
     };

@@ -359,6 +359,13 @@ if (empty($_SESSION['_installer_diagnostic_token'])) {
     $_SESSION['_installer_diagnostic_token'] = bin2hex(random_bytes(16));
 }
 $diagnosticToken = $_SESSION['_installer_diagnostic_token'];
+$serverFailures = array_values(array_map(
+    static fn (array $check): string => $check['name'],
+    array_filter(
+        $installer->checkRequirements(),
+        static fn (array $check): bool => ($check['required'] ?? true) && ! $check['pass'],
+    ),
+));
 
 $step = $_GET['step'] ?? (function_exists('request') ? request()->query('step', 'requirements') : 'requirements');
 $error = null;
@@ -740,7 +747,7 @@ if (! $allPassed) {
         <?php if ($step === 'requirements') { ?>
             <h2 style="text-align:center;">Installation readiness</h2>
             <p class="subtitle" style="text-align:center;">This will only take a moment.</p>
-            <?= view('install.hosting-check', ['deploymentUrl' => $currentUrl, 'deploymentCsrfToken' => $csrfToken, 'deploymentDiagnosticToken' => $diagnosticToken, 'serverReady' => $allPassed, 'nativeInstaller' => true])->render() ?>
+            <?= view('install.hosting-check', ['deploymentUrl' => $currentUrl, 'deploymentCsrfToken' => $csrfToken, 'deploymentDiagnosticToken' => $diagnosticToken, 'serverReady' => $allPassed, 'serverFailures' => $serverFailures, 'nativeInstaller' => true])->render() ?>
             <?php if ($allPassed) { ?>
                 <a hidden data-deployment-continue aria-disabled="true" data-deployment-href="<?= htmlspecialchars($installerUrl, ENT_QUOTES, 'UTF-8') ?>?step=database" class="btn">Next &rarr;</a>
             <?php } ?>
@@ -795,7 +802,7 @@ if (! $allPassed) {
 
         <?php } elseif ($step === 'admin') { ?>
             <h2>Create Primary Administrator</h2>
-            <?= view('install.hosting-check', ['deploymentUrl' => $currentUrl, 'deploymentCsrfToken' => $csrfToken, 'deploymentDiagnosticToken' => $diagnosticToken, 'serverReady' => $allPassed, 'nativeInstaller' => true])->render() ?>
+            <?= view('install.hosting-check', ['deploymentUrl' => $currentUrl, 'deploymentCsrfToken' => $csrfToken, 'deploymentDiagnosticToken' => $diagnosticToken, 'serverReady' => $allPassed, 'serverFailures' => $serverFailures, 'nativeInstaller' => true])->render() ?>
             <p class="subtitle">Set up the master administrator account for dashboard access and API configuration.</p>
             <form method="POST" action="<?= htmlspecialchars($installerUrl, ENT_QUOTES, 'UTF-8') ?>?step=admin">
                 <input type="hidden" name="_token" value="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>">
@@ -820,7 +827,7 @@ if (! $allPassed) {
 
         <?php } elseif ($step === 'done') { ?>
             <h2 style="text-align:center;">Installation complete</h2>
-            <?= view('install.hosting-check', ['deploymentUrl' => $currentUrl, 'deploymentDiagnosticToken' => $diagnosticToken, 'finalCheck' => true, 'serverReady' => $allPassed, 'nativeInstaller' => true])->render() ?>
+            <?= view('install.hosting-check', ['deploymentUrl' => $currentUrl, 'deploymentDiagnosticToken' => $diagnosticToken, 'finalCheck' => true, 'serverReady' => $allPassed, 'serverFailures' => $serverFailures, 'nativeInstaller' => true])->render() ?>
             <p class="subtitle" style="text-align:center;">Your account and database are ready.</p>
             <a hidden data-deployment-continue aria-disabled="true" data-deployment-href="<?= htmlspecialchars($installerBasePath.'/login', ENT_QUOTES, 'UTF-8') ?>" class="btn" style="margin-top: 1.5rem;">Go to Login &rarr;</a>
         <?php } ?>
