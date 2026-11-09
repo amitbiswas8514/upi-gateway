@@ -2,7 +2,7 @@
 @php $step = 4; @endphp
 
 @section('content')
-@include('install.hosting-check', ['deploymentUrl' => config('app.url'), 'serverReady' => $serverReady])
+@include('install.hosting-check', ['deploymentUrl' => config('app.url'), 'serverReady' => $serverReady, 'serverFailures' => $serverFailures ?? []])
 <p class="installer-kicker">Step 4 · Account</p>
 <h1 class="mt-2 text-2xl font-bold text-slate-950 sm:text-3xl">Create your admin account</h1>
 <p class="mt-2 text-sm leading-6 text-slate-500">Use these credentials to securely access and manage your dashboard.</p>

@@ -2,7 +2,7 @@
 @php $step = 5; @endphp
 
 @section('content')
-@include('install.hosting-check', ['deploymentUrl' => config('app.url'), 'finalCheck' => true, 'serverReady' => $serverReady])
+@include('install.hosting-check', ['deploymentUrl' => config('app.url'), 'finalCheck' => true, 'serverReady' => $serverReady, 'serverFailures' => $serverFailures ?? []])
 <div class="py-2 text-center sm:py-4">
     <p class="installer-kicker mb-5">Setup complete</p>
     <div class="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-xl shadow-emerald-500/25">

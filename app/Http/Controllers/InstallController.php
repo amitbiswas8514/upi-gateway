@@ -51,6 +51,7 @@ class InstallController extends Controller
         return view('install.index', [
             'requirements' => $requirements,
             'allPassed' => $failedChecks === [],
+            'serverFailures' => $failedChecks,
             'diagnostics' => $diagnostics,
         ]);
     }
@@ -223,6 +224,7 @@ class InstallController extends Controller
         return view('install.admin', [
             'diagnostics' => $this->installer->detectEnvironmentDiagnostics(request()),
             'serverReady' => $this->installer->allRequirementsPassed(),
+            'serverFailures' => $this->failedServerRequirements(),
         ]);
     }
 
@@ -280,6 +282,17 @@ class InstallController extends Controller
         return view('install.done', [
             'diagnostics' => $this->installer->detectEnvironmentDiagnostics($request),
             'serverReady' => $this->installer->allRequirementsPassed(),
+            'serverFailures' => $this->failedServerRequirements(),
         ]);
+    }
+
+    /** @return array<int, string> */
+    private function failedServerRequirements(): array
+    {
+        return collect($this->installer->checkRequirements())
+            ->filter(fn (array $check) => ($check['required'] ?? true) && ! $check['pass'])
+            ->pluck('name')
+            ->values()
+            ->all();
     }
 }
